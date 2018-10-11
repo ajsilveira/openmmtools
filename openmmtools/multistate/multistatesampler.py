@@ -1,5 +1,4 @@
 #!/usr/local/bin/env python
-openmmtools.multistate.multistatesampler.RestorationError
 
 # ==============================================================================
 # MODULE DOCSTRING
@@ -40,16 +39,12 @@ import datetime
 import numpy as np
 from simtk import unit, openmm
 
-from .multistatereporter import MultiStateReporter
-from .utils import SimulationNaNError
-from ..utils import with_timer, Timer
 
+from openmmtools import multistate, utils, states, mpi, mcmc, cache
 
 # clash between states variable in file and module name
 # variable name could be changed, and the module import changed to
-# from .. import states
-from ..states import SamplerState,group_by_compatibility,ThermodynamicState
-from .. import mpi,mcmc,cache
+
 from pymbar.utils import ParameterError
 
 #from yank.fire import FIREMinimizationIntegrator
@@ -531,7 +526,7 @@ class MultiStateSampler(object):
                                'refusing to overwrite.'.format(self._reporter.filepath))
 
         # Make sure sampler_states is an iterable of SamplerStates.
-        if isinstance(sampler_states, SamplerState):
+        if isinstance(sampler_states, states.SamplerState):
             sampler_states = [sampler_states]
 
         # Initialize internal attribute and dataset.
@@ -545,7 +540,7 @@ class MultiStateSampler(object):
 
         self._initialize_reporter()
 
-    @with_timer('Minimizing all replicas')
+    @utils.with_timer('Minimizing all replicas')
     def minimize(self, tolerance=1.0 * unit.kilojoules_per_mole / unit.nanometers,
                  max_iterations=0):
         """Minimize all replicas.
@@ -649,7 +644,7 @@ class MultiStateSampler(object):
                 if 'coordinate is nan' in str(e).lower():
                     err_message = "Initial coordinates were NaN! Check your inputs!"
                     logger.critical(err_message)
-                    raise SimulationNaNError(err_message)
+                    raise multistate.utils.SimulationNaNError(err_message)
                 else:
                     # If not the special case, raise the error normally
                     raise e
@@ -657,7 +652,7 @@ class MultiStateSampler(object):
                                 self._neighborhoods, self._energy_unsampled_states, self._iteration)
             self._check_nan_energy()
 
-        timer = Timer()
+        timer = utils.Timer()
         timer.start('Run ReplicaExchange')
         run_initial_iteration = self._iteration
 
@@ -757,6 +752,9 @@ class MultiStateSampler(object):
         All calls to this function should be *identical* to :func:`create` itself
         """
         # Check all systems are either periodic or not.
+        print(thermodynamic_states[0])
+        print(thermodynamic_states)
+        print(dir(thermodynamic_states))
         is_periodic = thermodynamic_states[0].is_periodic
         for thermodynamic_state in thermodynamic_states:
             if thermodynamic_state.is_periodic != is_periodic:
@@ -772,8 +770,9 @@ class MultiStateSampler(object):
         # Make sure all states have same number of particles. We don't
         # currently support writing storage with different n_particles
         n_particles = thermodynamic_states[0].n_particles
-        for states in [thermodynamic_states, sampler_states]:
-            for state in states:
+        i = 1 
+        for check_states in [thermodynamic_states, sampler_states]:
+            for state in check_states:
                 if state.n_particles != n_particles:
                     raise ValueError('All ThermodynamicStates and SamplerStates must '
                                      'have the same number of particles')
@@ -981,7 +980,7 @@ class MultiStateSampler(object):
                 err_msg += '\n\tEnergies for positions at replica {} (current state {}): {} kT'.format(
                     replica_id, self._replica_thermodynamic_states[replica_id], energy_row)
             logger.critical(err_msg)
-            raise SimulationNaNError(err_msg)
+            raise multistate.utils.SimulationNaNError(err_msg)
 
     @mpi.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
     def _display_citations(self, overwrite_global=False, citation_stack=None):
@@ -1059,7 +1058,7 @@ class MultiStateSampler(object):
         """
         if isinstance(storage, str):
             # Open a reporter to read the data.
-            reporter = MultiStateReporter(storage)
+            reporter = multistate.MultiStateReporter(storage)
         else:
             reporter = storage
 
@@ -1091,7 +1090,7 @@ class MultiStateSampler(object):
 
     @mpi.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
     @mpi.delayed_termination
-    @with_timer('Writing iteration information to storage')
+    @utils.with_timer('Writing iteration information to storage')
     def _report_iteration(self):
         """Store positions, states, and energies of current iteration.
 
@@ -1187,7 +1186,7 @@ class MultiStateSampler(object):
     # Internal-usage: Distributed tasks.
     # -------------------------------------------------------------------------
 
-    @with_timer('Propagating all replicas')
+    @utils.with_timer('Propagating all replicas')
     def _propagate_replicas(self):
         """Propagate all replicas."""
         # TODO  Report on efficiency of dyanmics (fraction of time wasted to overhead).
@@ -1236,7 +1235,7 @@ class MultiStateSampler(object):
                        'The state of the system and integrator before the error were saved'
                        ' in {}').format(replica_id, thermodynamic_state_id, output_dir)
             logger.critical(message)
-            raise SimulationNaNError(message)
+            raise multistate.utils.SimulationNaNError(message)
 
         # Return new positions and box vectors.
         return sampler_state.positions, sampler_state.box_vectors
@@ -1307,7 +1306,7 @@ class MultiStateSampler(object):
         # Return minimized positions.
         return sampler_state.positions
 
-    @with_timer('Computing energy matrix')
+    @utils.with_timer('Computing energy matrix')
     def _compute_energies(self):
         """Compute energies of all replicas at all states."""
 
@@ -1344,10 +1343,10 @@ class MultiStateSampler(object):
         sampler_state = self._sampler_states[replica_id]
 
         # Compute energy for all thermodynamic states.
-        for energies, states in [(energy_neighborhood_states, neighborhood_thermodynamic_states),
+        for energies, the_states in [(energy_neighborhood_states, neighborhood_thermodynamic_states),
                                  (energy_unsampled_states, self._unsampled_states)]:
             # Group thermodynamic states by compatibility.
-            compatible_groups, original_indices = group_by_compatibility(states)
+            compatible_groups, original_indices = states.group_by_compatibility(the_states)
 
             # Compute the reduced potentials of all the compatible states.
             for compatible_group, state_indices in zip(compatible_groups, original_indices):
@@ -1359,7 +1358,7 @@ class MultiStateSampler(object):
                 sampler_state.apply_to_context(context, ignore_velocities=True)
 
                 # Compute and update the reduced potentials.
-                compatible_energies = ThermodynamicState.reduced_potential_at_states(
+                compatible_energies = states.ThermodynamicState.reduced_potential_at_states(
                     context, compatible_group)
                 for energy_idx, state_idx in enumerate(state_indices):
                     energies[state_idx] = compatible_energies[energy_idx]
@@ -1395,7 +1394,7 @@ class MultiStateSampler(object):
 
     @mpi.on_single_node(rank=0, broadcast_result=True)
     @mpi.delayed_termination
-    @with_timer('Computing offline free energy estimate')
+    @utils.with_timer('Computing offline free energy estimate')
     def _offline_analysis(self):
         """Compute offline estimate of free energies
 
@@ -1425,7 +1424,7 @@ class MultiStateSampler(object):
 
         # Indices for online analysis, "i'th index, j'th index"
         idx, jdx = 0, -1
-        timer = Timer()
+        timer = utils.Timer()
         timer.start("MBAR")
         logger.debug("Computing free energy with MBAR...")
         try:  # Trap errors for MBAR being under sampled and the W_nk matrix not being normalized correctly
@@ -1473,14 +1472,14 @@ class MultiStateSampler(object):
 
     @mpi.on_single_node(rank=0, broadcast_result=True)
     @mpi.delayed_termination
-    @with_timer('Computing online free energy estimate')
+    @utils.with_timer('Computing online free energy estimate')
     def _online_analysis(self, gamma0=1.0):
         """Perform online analysis of free energies
 
         This scheme works with all localities: global and local.
 
         """
-        timer = Timer()
+        timer = utils.Timer()
         timer.start("Online analysis")
         from scipy.special import logsumexp
 

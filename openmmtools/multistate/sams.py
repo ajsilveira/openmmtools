@@ -27,11 +27,8 @@ import logging
 import numpy as np
 from scipy.misc import logsumexp
 
-from .. import mpi
-from .multistatesampler import MultiStateSampler
-from .multistatereporter import MultiStateReporter
-from .multistateanalyzer import MultiStateSamplerAnalyzer
-from ..utils import time_it 
+from openmmtools import mpi, multistate, utils
+from openmmtools.multistate.multistateanalyzer import MultiStateSamplerAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ==============================================================================
 
 
-class SAMSSampler(MultiStateSampler):
+class SAMSSampler(multistate.MultiStateSampler):
     """Self-adjusted mixture sampling (SAMS), also known as optimally-adjusted mixture sampling.
 
     This class provides a facility for self-adjusted mixture sampling simulations.
@@ -107,7 +104,7 @@ class SAMSSampler(MultiStateSampler):
     Create a single-replica SAMS simulation bound to a storage file and run:
 
     >>> storage_path = tempfile.NamedTemporaryFile(delete=False).name + '.nc'
-    >>> reporter = MultiStateReporter(storage_path, checkpoint_interval=1)
+    >>> reporter = multistate.MultiStateReporter(storage_path, checkpoint_interval=1)
     >>> simulation.create(thermodynamic_states=thermodynamic_states,
     >>>                   sampler_states=[states.SamplerState(testsystem.positions)],
     >>>                   storage=reporter)
@@ -131,7 +128,7 @@ class SAMSSampler(MultiStateSampler):
     class while the simulation is running. This reads the SamplerStates of every
     run iteration.
 
-    >>> reporter = MultiStateReporter(storage=storage_path, open_mode='r', checkpoint_interval=1)
+    >>> reporter = multistate.MultiStateReporter(storage=storage_path, open_mode='r', checkpoint_interval=1)
     >>> sampler_states = reporter.read_sampler_states(iteration=range(1, 4))
     >>> len(sampler_states)
     3
@@ -214,12 +211,12 @@ class SAMSSampler(MultiStateSampler):
         self._replica_neighbors = None
         self._cached_state_histogram = None
 
-    class _StoredProperty(MultiStateSampler._StoredProperty):
+    class _StoredProperty(multistate.MultiStateSampler._StoredProperty):
 
         @staticmethod
         def _state_update_scheme_validator(instance, scheme):
             supported_schemes = ['global-jump', 'local-jump', 'restricted-range-jump']
-            supported_schemes = ['global-jump'] # TODO: Eliminate this after release
+#            supported_schemes = ['global-jump'] # TODO: Eliminate this after release
             if scheme not in supported_schemes:
                 raise ValueError("Unknown update scheme '{}'. Supported values "
                                  "are {}.".format(scheme, supported_schemes))
@@ -371,7 +368,7 @@ class SAMSSampler(MultiStateSampler):
         # Perform swap attempts according to requested scheme.
         # TODO: We may be able to refactor this to simply have different update schemes compute neighborhoods differently.
         # TODO: Can we allow "plugin" addition of new update schemes that can be registered externally?
-        with time_it('Mixing of replicas'):
+        with utils.time_it('Mixing of replicas'):
             # Initialize statistics. This matrix is modified by the jump function and used when updating the logZ estimates.
             replicas_log_P_k = np.zeros([self.n_replicas, self.n_states], np.float64)
             if self.state_update_scheme == 'global-jump':

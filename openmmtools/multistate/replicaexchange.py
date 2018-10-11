@@ -36,14 +36,8 @@ import logging
 import numpy as np
 import mdtraj as md
 
-
-from .. import mpi
-from .multistatesampler import MultiStateSampler
-from .multistatereporter import MultiStateReporter
-from .multistateanalyzer import MultiStateSamplerAnalyzer
-
-from ..utils import time_it 
-
+from openmmtools import mpi, multistate,utils
+from openmmtools.multistate.multistateanalyzer import MultiStateSamplerAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +46,7 @@ logger = logging.getLogger(__name__)
 # REPLICA-EXCHANGE SIMULATION
 # ==============================================================================
 
-class ReplicaExchangeSampler(MultiStateSampler):
+class ReplicaExchangeSampler(multistate.MultiStateSampler):
     """Replica-exchange simulation facility.
 
     This MultiStateSampler class provides a general replica-exchange simulation facility,
@@ -144,7 +138,7 @@ class ReplicaExchangeSampler(MultiStateSampler):
     Create simulation with its storage file (in a temporary directory) and run.
 
     >>> storage_path = tempfile.NamedTemporaryFile(delete=False).name + '.nc'
-    >>> reporter = MultiStateReporter(storage_path, checkpoint_interval=1)
+    >>> reporter = multistate.MultiStateReporter(storage_path, checkpoint_interval=1)
     >>> simulation.create(thermodynamic_states=thermodynamic_states,
     >>>                   sampler_states=states.SamplerState(testsystem.positions),
     >>>                   storage=reporter)
@@ -168,7 +162,7 @@ class ReplicaExchangeSampler(MultiStateSampler):
     class while the simulation is running. This reads the SamplerStates of every
     run iteration.
 
-    >>> reporter = MultiStateReporter(storage=storage_path, open_mode='r', checkpoint_interval=1)
+    >>> reporter = multistate.MultiStateReporter(storage=storage_path, open_mode='r', checkpoint_interval=1)
     >>> sampler_states = reporter.read_sampler_states(iteration=range(1, 4))
     >>> len(sampler_states)
     3
@@ -202,7 +196,7 @@ class ReplicaExchangeSampler(MultiStateSampler):
         super(ReplicaExchangeSampler, self).__init__(**kwargs)
         self.replica_mixing_scheme = replica_mixing_scheme
 
-    class _StoredProperty(MultiStateSampler._StoredProperty):
+    class _StoredProperty(multistate.MultiStateSampler._StoredProperty):
 
         @staticmethod
         def _repex_mixing_scheme_validator(instance, replica_mixing_scheme):
@@ -247,7 +241,7 @@ class ReplicaExchangeSampler(MultiStateSampler):
         self._n_proposed_matrix[:, :] = 0
 
         # Perform swap attempts according to requested scheme.
-        with time_it('Mixing of replicas'):
+        with utils.time_it('Mixing of replicas'):
             if self.replica_mixing_scheme == 'swap-neighbors':
                 self._mix_neighboring_replicas()
             elif self.replica_mixing_scheme == 'swap-all':

@@ -31,8 +31,7 @@ import math
 import logging
 import numpy as np
 
-from .replicaexchange import ReplicaExchangeSampler, ReplicaExchangeAnalyzer
-from .multistatereporter import MultiStateReporter
+from openmmtools import multistate
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +40,7 @@ logger = logging.getLogger(__name__)
 # PARALLEL TEMPERING
 # ==============================================================================
 
-class ParallelTemperingSampler(ReplicaExchangeSampler):
+class ParallelTemperingSampler(multistate.ReplicaExchangeSampler):
     """Parallel tempering simulation facility.
 
     This class provides a facility for parallel tempering simulations. It
@@ -75,7 +74,7 @@ class ParallelTemperingSampler(ReplicaExchangeSampler):
     Create simulation with its storage file (in a temporary directory) and run.
 
     >>> storage_path = tempfile.NamedTemporaryFile(delete=False).name + '.nc'
-    >>> reporter = MultiStateReporter(storage_path, checkpoint_interval=10)
+    >>> reporter = multistate.MultiStateReporter(storage_path, checkpoint_interval=10)
     >>> simulation.create(reference_state,
     ...                   states.SamplerState(testsystem.positions),
     ...                   reporter, min_temperature=T_min,
@@ -225,7 +224,7 @@ class ParallelTemperingSampler(ReplicaExchangeSampler):
         return energy_neighborhood_states, energy_unsampled_states
 
 
-class ParallelTemperingAnalyzer(ReplicaExchangeAnalyzer):
+class ParallelTemperingAnalyzer(multistate.ReplicaExchangeAnalyzer):
     """
     The ParallelTemperingAnalyzer is the analyzer for a simulation generated from a Parallel Tempering sampler
     simulation, implemented as an instance of the :class:`ReplicaExchangeAnalyzer` as the sampler is a subclass of

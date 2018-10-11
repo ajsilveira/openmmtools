@@ -61,10 +61,10 @@ This code is licensed under the latest available version of the MIT License.
 
 """
 
-from .multistatesampler import MultiStateSampler
-from .multistatereporter import MultiStateReporter
-from .replicaexchange import ReplicaExchangeSampler, ReplicaExchangeAnalyzer
-from .paralleltempering import ParallelTemperingSampler, ParallelTemperingAnalyzer
-from .sams import SAMSSampler, SAMSAnalyzer
-from .multistateanalyzer import *
-from ..utils import *
+from openmmtools.multistate.multistatesampler import MultiStateSampler
+from openmmtools.multistate.multistatereporter import MultiStateReporter
+from openmmtools.multistate.replicaexchange import ReplicaExchangeSampler, ReplicaExchangeAnalyzer
+from openmmtools.multistate.paralleltempering import ParallelTemperingSampler, ParallelTemperingAnalyzer
+from openmmtools.multistate.sams import SAMSSampler, SAMSAnalyzer
+from openmmtools.multistate.multistateanalyzer import MultiStateSamplerAnalyzer 
+from openmmtools.multistate.utils import *

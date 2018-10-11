@@ -35,9 +35,7 @@ from scipy.misc import logsumexp
 from pymbar import MBAR, timeseries
 #import openmmtools as mmtools
 
-from .multistatereporter import MultiStateReporter
-
-from .. import utils
+from openmmtools import multistate, utils
 
 ABC = abc.ABC
 logger = logging.getLogger(__name__)
@@ -536,8 +534,8 @@ class PhaseAnalyzer(ABC):
         measured from and how each phase interfaces with other phases.
         """
         # Arguments validation.
-        if not type(reporter) is MultiStateReporter:
-            raise ValueError('reporter must be a MultiStateReporter instance')
+        if not type(reporter) is multistate.MultiStateReporter:
+            raise ValueError('reporter must be a multistate.MultiStateReporter instance')
         if not isinstance(registry, ObservablesRegistry):
             raise ValueError("Registry must be an instanced ObservablesRegistry")
         if analysis_kwargs is None:
