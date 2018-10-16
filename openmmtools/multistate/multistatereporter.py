@@ -46,7 +46,7 @@ from typing import Union, Any
 from simtk import unit
 
 from openmmtools.utils import deserialize, with_timer, serialize, quantity_from_string
-from openmmtools import version
+from openmmtools import version,states
 
 logger = logging.getLogger(__name__)
 

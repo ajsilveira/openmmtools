@@ -752,9 +752,6 @@ class MultiStateSampler(object):
         All calls to this function should be *identical* to :func:`create` itself
         """
         # Check all systems are either periodic or not.
-        print(thermodynamic_states[0])
-        print(thermodynamic_states)
-        print(dir(thermodynamic_states))
         is_periodic = thermodynamic_states[0].is_periodic
         for thermodynamic_state in thermodynamic_states:
             if thermodynamic_state.is_periodic != is_periodic:
