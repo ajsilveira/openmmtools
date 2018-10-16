@@ -27,7 +27,9 @@ script:
   - conda install --yes --quiet --use-local ${PACKAGENAME}-dev
   # Install testing dependencies. Without specifying the numpy version, numpy
   # is downgraded to 1.9 and we get a "libgfortran not found" issue.
-  - conda install --yes --quiet nose nose-timer pymbar "numpy>=1.11"
+  - conda install --yes --quiet pip nose nose-timer pymbar "numpy>=1.11"
+  # installing ta-lib for visual studios
+  - pip install ta-lib
   # Test the package
   # TODO: remove the IGNORE_EXCEPTION_DETAIL when we drop Python2 support
   - cd devtools && nosetests $PACKAGENAME --nocapture --verbosity=2 --with-timer --with-doctest --doctest-options="+IGNORE_EXCEPTION_DETAIL" -a '!slow' && cd ..
