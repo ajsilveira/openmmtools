@@ -27,8 +27,9 @@ import logging
 import numpy as np
 from scipy.misc import logsumexp
 
-from openmmtools import mpi, multistate, utils
+from openmmtools import multistate, utils
 from openmmtools.multistate.multistateanalyzer import MultiStateSamplerAnalyzer
+import mpiplus
 
 logger = logging.getLogger(__name__)
 
@@ -343,8 +344,8 @@ class SAMSSampler(multistate.MultiStateSampler):
         self._initialize_stage()
         self._update_stage()
 
-    @mpi.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
-    @mpi.delayed_termination
+    @mpiplus.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
+    @mpiplus.delayed_termination
     def _report_iteration_items(self):
         super(SAMSSampler, self)._report_iteration_items()
         self._reporter.write_logZ(self._iteration, self._logZ)
@@ -356,7 +357,7 @@ class SAMSSampler(multistate.MultiStateSampler):
             self._cached_state_histogram = np.zeros(self.n_states, dtype=int)
         self._cached_state_histogram[states] += counts
 
-    @mpi.on_single_node(0, broadcast_result=True)
+    @mpiplus.on_single_node(0, broadcast_result=True)
     def _mix_replicas(self):
         """Update thermodynamic states according to user-specified scheme."""
         logger.debug("Updating thermodynamic states using %s scheme..." % self.state_update_scheme)

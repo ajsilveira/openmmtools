@@ -36,8 +36,9 @@ import logging
 import numpy as np
 import mdtraj as md
 
-from openmmtools import mpi, multistate,utils
+from openmmtools import multistate, utils
 from openmmtools.multistate.multistateanalyzer import MultiStateSamplerAnalyzer
+import mpiplus
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,7 @@ class ReplicaExchangeSampler(multistate.MultiStateSampler):
 
         super()._pre_write_create(thermodynamic_states, sampler_states, *args, **kwargs)
 
-    @mpi.on_single_node(0, broadcast_result=True)
+    @mpiplus.on_single_node(0, broadcast_result=True)
     def _mix_replicas(self):
         """Attempt to swap replicas according to user-specified scheme."""
         logger.debug("Mixing replicas...")
@@ -340,7 +341,7 @@ class ReplicaExchangeSampler(multistate.MultiStateSampler):
             self._n_accepted_matrix[thermodynamic_state_i, thermodynamic_state_j] += 1
             self._n_accepted_matrix[thermodynamic_state_j, thermodynamic_state_i] += 1
 
-    @mpi.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
+    @mpiplus.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
     def _display_citations(self, overwrite_global=False, citation_stack=None):
         """
         Display papers to be cited.

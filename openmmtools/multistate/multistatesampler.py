@@ -40,8 +40,8 @@ import numpy as np
 from simtk import unit, openmm
 
 
-from openmmtools import multistate, utils, states, mpi, mcmc, cache
-
+from openmmtools import multistate, utils, states, mcmc, cache
+import mpiplus
 # clash between states variable in file and module name
 # variable name could be changed, and the module import changed to
 
@@ -227,7 +227,7 @@ class MultiStateSampler(object):
 
         # We open the reporter only in node 0 in append mode ready for use
         sampler._reporter = reporter
-        mpi.run_single_node(0, sampler._reporter.open, mode='a',
+        mpiplus.run_single_node(0, sampler._reporter.open, mode='a',
                             broadcast_result=False, sync_nodes=False)
         # Don't write the new last iteration, we have not technically
         # written anything yet, so there is no "junk".
@@ -361,7 +361,7 @@ class MultiStateSampler(object):
 
         # Update sampler state in the object and on storage.
         self._sampler_states = copy.deepcopy(value)
-        mpi.run_single_node(0, self._reporter.write_sampler_states,
+        mpiplus.run_single_node(0, self._reporter.write_sampler_states,
                             self._sampler_states, self._iteration)
 
     @property
@@ -395,7 +395,7 @@ class MultiStateSampler(object):
             setattr(instance, '_' + self._option_name, new_value)
             # Update storage if we ReplicaExchange is initialized.
             if instance._reporter is not None and instance._reporter.is_open():
-                mpi.run_single_node(0, instance._store_options)
+                mpiplus.run_single_node(0, instance._store_options)
 
         # ----------------------------------
         # Value Validation of the properties
@@ -521,7 +521,7 @@ class MultiStateSampler(object):
         # broadcasted. This is to avoid the case where the other nodes
         # arrive to this line after node 0 has already created the storage
         # file, causing an error.
-        if mpi.run_single_node(0, self._reporter.storage_exists, broadcast_result=True):
+        if mpiplus.run_single_node(0, self._reporter.storage_exists, broadcast_result=True):
             raise RuntimeError('Storage file {} already exists; cowardly '
                                'refusing to overwrite.'.format(self._reporter.filepath))
 
@@ -566,7 +566,7 @@ class MultiStateSampler(object):
         # Distribute minimization across nodes. Only node 0 will get all positions.
         # The other nodes, only need the positions that they use for propagation and
         # computation of the energy matrix entries.
-        minimized_positions, sampler_state_ids = mpi.distribute(self._minimize_replica, range(self.n_replicas),
+        minimized_positions, sampler_state_ids = mpiplus.distribute(self._minimize_replica, range(self.n_replicas),
                                                                 tolerance, max_iterations,
                                                                 send_results_to=0)
 
@@ -576,7 +576,7 @@ class MultiStateSampler(object):
             self._sampler_states[sampler_state_id].positions = minimized_pos
 
         # Save the stored positions in the storage
-        mpi.run_single_node(0, self._reporter.write_sampler_states, self._sampler_states, self._iteration)
+        mpiplus.run_single_node(0, self._reporter.write_sampler_states, self._sampler_states, self._iteration)
 
     def equilibrate(self, n_iterations, mcmc_moves=None):
         """Equilibrate all replicas.
@@ -619,7 +619,7 @@ class MultiStateSampler(object):
         self._mcmc_moves = production_mcmc_moves
 
         # Update stored positions.
-        mpi.run_single_node(0, self._reporter.write_sampler_states, self._sampler_states, self._iteration)
+        mpiplus.run_single_node(0, self._reporter.write_sampler_states, self._sampler_states, self._iteration)
 
     def run(self, n_iterations=None):
         """Run the replica-exchange simulation.
@@ -648,7 +648,7 @@ class MultiStateSampler(object):
                 else:
                     # If not the special case, raise the error normally
                     raise e
-            mpi.run_single_node(0, self._reporter.write_energies, self._energy_thermodynamic_states,
+            mpiplus.run_single_node(0, self._reporter.write_energies, self._energy_thermodynamic_states,
                                 self._neighborhoods, self._energy_unsampled_states, self._iteration)
             self._check_nan_energy()
 
@@ -732,7 +732,7 @@ class MultiStateSampler(object):
     def __del__(self):
         # The reporter could be None if MultiStateSampler was not created.
         if hasattr(self, '_reporter') and (self._reporter is not None):
-            mpi.run_single_node(0, self._reporter.close)
+            mpiplus.run_single_node(0, self._reporter.close)
 
     # -------------------------------------------------------------------------
     # Internal-usage.
@@ -979,7 +979,7 @@ class MultiStateSampler(object):
             logger.critical(err_msg)
             raise multistate.utils.SimulationNaNError(err_msg)
 
-    @mpi.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
+    @mpiplus.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
     def _display_citations(self, overwrite_global=False, citation_stack=None):
         """
         Display papers to be cited.
@@ -1065,7 +1065,7 @@ class MultiStateSampler(object):
                                     'cannot read status.'.format(reporter.filepath))
         return reporter
 
-    @mpi.on_single_node(rank=0, broadcast_result=False, sync_nodes=True)
+    @mpiplus.on_single_node(rank=0, broadcast_result=False, sync_nodes=True)
     def _initialize_reporter(self):
         """Initialize the reporter and store initial information.
 
@@ -1085,8 +1085,8 @@ class MultiStateSampler(object):
         # Store initial conditions. This forces the storage to be synchronized.
         self._report_iteration()
 
-    @mpi.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
-    @mpi.delayed_termination
+    @mpiplus.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
+    @mpiplus.delayed_termination
     @utils.with_timer('Writing iteration information to storage')
     def _report_iteration(self):
         """Store positions, states, and energies of current iteration.
@@ -1105,8 +1105,8 @@ class MultiStateSampler(object):
         self._reporter.write_timestamp(self._iteration)
         self._reporter.write_last_iteration(self._iteration)
 
-    @mpi.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
-    @mpi.delayed_termination
+    @mpiplus.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
+    @mpiplus.delayed_termination
     def _report_iteration_items(self):
         """
         Sub-function of :func:`_report_iteration` which handles all the actual individual item reporting in a
@@ -1192,7 +1192,7 @@ class MultiStateSampler(object):
         # Distribute propagation across nodes. Only node 0 will get all positions
         # and box vectors. The other nodes, only need the positions that they use
         # for propagation and computation of the energy matrix entries.
-        propagated_states, replica_ids = mpi.distribute(self._propagate_replica, range(self.n_replicas),
+        propagated_states, replica_ids = mpiplus.distribute(self._propagate_replica, range(self.n_replicas),
                                                         send_results_to=0)
 
         # Update all sampler states. For non-0 nodes, this will update only the
@@ -1204,7 +1204,7 @@ class MultiStateSampler(object):
 
         # Gather all MCMCMoves statistics. All nodes must have these up-to-date
         # since they are tied to the ThermodynamicState, not the replica.
-        all_statistics = mpi.distribute(self._get_replica_move_statistics, range(self.n_replicas),
+        all_statistics = mpiplus.distribute(self._get_replica_move_statistics, range(self.n_replicas),
                                         send_results_to='all')
         for replica_id in range(self.n_replicas):
             if len(all_statistics[replica_id]) > 0:
@@ -1315,7 +1315,7 @@ class MultiStateSampler(object):
 
         # Distribute energy computation across nodes. Only node 0 receives
         # all the energies since it needs to store them and mix states.
-        new_energies, replica_ids = mpi.distribute(self._compute_replica_energies, range(self.n_replicas),
+        new_energies, replica_ids = mpiplus.distribute(self._compute_replica_energies, range(self.n_replicas),
                                                    send_results_to=0)
 
         # Update energy matrices. Non-0 nodes update only the energies computed by this replica.
@@ -1367,7 +1367,7 @@ class MultiStateSampler(object):
     # Internal-usage: Replicas mixing.
     # -------------------------------------------------------------------------
 
-    @mpi.on_single_node(0, broadcast_result=True)
+    @mpiplus.on_single_node(0, broadcast_result=True)
     def _mix_replicas(self):
         """Do nothing to replicas."""
         logger.debug("Mixing replicas (does nothing for MultiStateSampler)...")
@@ -1389,8 +1389,8 @@ class MultiStateSampler(object):
     # Internal-usage: Offline and online analysis
     # -------------------------------------------------------------------------
 
-    @mpi.on_single_node(rank=0, broadcast_result=True)
-    @mpi.delayed_termination
+    @mpiplus.on_single_node(rank=0, broadcast_result=True)
+    @mpiplus.delayed_termination
     @utils.with_timer('Computing offline free energy estimate')
     def _offline_analysis(self):
         """Compute offline estimate of free energies
@@ -1467,8 +1467,8 @@ class MultiStateSampler(object):
 
         return self._last_err_free_energy
 
-    @mpi.on_single_node(rank=0, broadcast_result=True)
-    @mpi.delayed_termination
+    @mpiplus.on_single_node(rank=0, broadcast_result=True)
+    @mpiplus.delayed_termination
     @utils.with_timer('Computing online free energy estimate')
     def _online_analysis(self, gamma0=1.0):
         """Perform online analysis of free energies
