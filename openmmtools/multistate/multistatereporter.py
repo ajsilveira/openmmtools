@@ -384,11 +384,11 @@ class MultiStateReporter(object):
             ncfile.createDimension('spatial', 3)  # Number of spatial dimensions.
 
             # Set global attributes.
-#            ncfile.application = 'YANK'
-#            ncfile.program = 'yank.py'
+            ncfile.application = 'YANK'
+            ncfile.program = 'yank.py'
             ncfile.programVersion = version.short_version
             ncfile.Conventions = convention
-#            ncfile.ConventionVersion = '0.2'
+            ncfile.ConventionVersion = '0.2'
             ncfile.DataUsedFor = nc_name
             ncfile.CheckpointInterval = self._checkpoint_interval
 
@@ -697,6 +697,7 @@ class MultiStateReporter(object):
 
         """
         iteration = self._map_iteration_to_good(iteration)
+        logger.debug('read_replica_thermodynamic_states: iteration = {}'.format(iteration))
         return self._storage_analysis.variables['states'][iteration].astype(np.int64)
 
     def write_replica_thermodynamic_states(self, state_indices, iteration):

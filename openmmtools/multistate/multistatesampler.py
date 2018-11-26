@@ -47,7 +47,7 @@ import mpiplus
 
 from pymbar.utils import ParameterError
 
-#from yank.fire import FIREMinimizationIntegrator
+from yank.fire import FIREMinimizationIntegrator
 
 logger = logging.getLogger(__name__)
 
@@ -767,9 +767,8 @@ class MultiStateSampler(object):
         # Make sure all states have same number of particles. We don't
         # currently support writing storage with different n_particles
         n_particles = thermodynamic_states[0].n_particles
-        i = 1 
-        for check_states in [thermodynamic_states, sampler_states]:
-            for state in check_states:
+        for states in [thermodynamic_states, sampler_states]:
+            for state in states:
                 if state.n_particles != n_particles:
                     raise ValueError('All ThermodynamicStates and SamplerStates must '
                                      'have the same number of particles')
@@ -1340,10 +1339,10 @@ class MultiStateSampler(object):
         sampler_state = self._sampler_states[replica_id]
 
         # Compute energy for all thermodynamic states.
-        for energies, the_states in [(energy_neighborhood_states, neighborhood_thermodynamic_states),
+        for energies, states in [(energy_neighborhood_states, neighborhood_thermodynamic_states),
                                  (energy_unsampled_states, self._unsampled_states)]:
             # Group thermodynamic states by compatibility.
-            compatible_groups, original_indices = states.group_by_compatibility(the_states)
+            compatible_groups, original_indices = states.group_by_compatibility(states)
 
             # Compute the reduced potentials of all the compatible states.
             for compatible_group, state_indices in zip(compatible_groups, original_indices):

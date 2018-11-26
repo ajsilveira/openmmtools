@@ -1960,6 +1960,19 @@ class MultiStateSamplerAnalyzer(PhaseAnalyzer):
         n_uncorrelated_iterations : int
         """
         u_n = self.get_effective_energy_timeseries(energies, replica_state_indices)
+
+        # For SAMS, if there is a second-stage start time, use only the asymptotically optimal data
+        t0 = 1 # discard minimization frame
+        try:
+            iteration = len(u_n)
+            data = self._reporter.read_online_analysis_data(None, 't0')
+            t0 = max(t0, int(data['t0'][0]))
+            logger.debug('t0 found; using initial t0 = {} instead of 1'.format(t0))
+        except Exception as e:
+            # No t0 found
+            logger.debug('Could not find t0: {}'.format(e))
+            pass
+
         # Discard equilibration samples.
         # TODO: if we include u_n[0] (the energy right after minimization) in the equilibration detection,
         # TODO:         then number_equilibrated is 0. Find a better way than just discarding first frame.
@@ -1970,7 +1983,7 @@ class MultiStateSamplerAnalyzer(PhaseAnalyzer):
         g_t = g_i[i_max]
         equilibration_data = [n_equilibration, g_t, n_effective_max]
         # Discard also minimization frame.
-        equilibration_data[0] += 1
+        equilibration_data[0] += t0
         self._equilibration_data = tuple(equilibration_data)
         logger.debug('Equilibration data: {}'.format(equilibration_data))
         return self._equilibration_data
