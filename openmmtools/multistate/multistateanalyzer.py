@@ -35,7 +35,7 @@ from scipy.misc import logsumexp
 from pymbar import MBAR, timeseries
 #import openmmtools as mmtools
 
-from openmmtools import multistate, utils
+from openmmtools import multistate, utils, forces
 
 ABC = abc.ABC
 logger = logging.getLogger(__name__)
@@ -1043,7 +1043,7 @@ class PhaseAnalyzer(ABC):
         # Reset self._sign
         self._sign = '+'
         if self.name is None:
-            names.append(utils.generate_phase_name(self.name, []))
+            names.append(multistate.utils.generate_phase_name(self.name, []))
         else:
             names.append(self.name)
         if isinstance(other, MultiPhaseAnalyzer):
@@ -1053,7 +1053,7 @@ class PhaseAnalyzer(ABC):
             final_new_names = []
             for name in new_names:
                 other_names = [n for n in new_names if n != name]
-                final_new_names.append(utils.generate_phase_name(name, other_names + names))
+                final_new_names.append(multistate.utils.generate_phase_name(name, other_names + names))
             names.extend(final_new_names)
             for new_sign in new_signs:
                 if operator != '+' and new_sign == '+':
@@ -1062,7 +1062,7 @@ class PhaseAnalyzer(ABC):
                     signs.append('+')
             phases.extend(new_phases)
         elif isinstance(other, PhaseAnalyzer):
-            names.append(utils.generate_phase_name(other.name, names))
+            names.append(multistate.utils.generate_phase_name(other.name, names))
             if operator != '+' and other._sign == '+':
                 signs.append('-')
             else:
@@ -1435,9 +1435,9 @@ class MultiStateSamplerAnalyzer(PhaseAnalyzer):
         if not self.use_full_trajectory:
             for i, energies in enumerate(energy_data):
                 # Discard equilibration iterations.
-                energies = utils.remove_unequilibrated_data(energies, number_equilibrated, -1)
+                energies = multistate.utils.remove_unequilibrated_data(energies, number_equilibrated, -1)
                 # Subsample along the decorrelation data.
-                energy_data[i] = utils.subsample_data_along_axis(energies, g_t, -1)
+                energy_data[i] = multistate.utils.subsample_data_along_axis(energies, g_t, -1)
         sampled_energy_matrix, unsampled_energy_matrix, neighborhood, replicas_state_indices = energy_data
 
         # Initialize the MBAR matrices in ln form.
@@ -1678,7 +1678,7 @@ class MultiStateSamplerAnalyzer(PhaseAnalyzer):
         if compute_distances and is_periodic:
             # Create topology with only the restrained atoms.
             serialized_topography = self._reporter.read_dict('metadata/topography')
-            topography = utils.deserialize(serialized_topography)
+            topography = multistate.utils.deserialize(serialized_topography)
             topology = topography.topology
             topology = topology.subset(self._reporter.analysis_particle_indices)
             # Use the receptor as an anchor molecule and image the ligand.
@@ -1976,7 +1976,7 @@ class MultiStateSamplerAnalyzer(PhaseAnalyzer):
         # Discard equilibration samples.
         # TODO: if we include u_n[0] (the energy right after minimization) in the equilibration detection,
         # TODO:         then number_equilibrated is 0. Find a better way than just discarding first frame.
-        i_t, g_i, n_effective_i = utils.get_equilibration_data_per_sample(u_n[1:])
+        i_t, g_i, n_effective_i = multistate.utils.get_equilibration_data_per_sample(u_n[1:])
         n_effective_max = n_effective_i.max()
         i_max = n_effective_i.argmax()
         n_equilibration = i_t[i_max]
@@ -2296,7 +2296,7 @@ class MultiPhaseAnalyzer(object):
             final_new_names = []
             for name in new_names:
                 other_names = [n for n in new_names if n != name]
-                final_new_names.append(utils.generate_phase_name(name, other_names + names))
+                final_new_names.append(multistate.utils.generate_phase_name(name, other_names + names))
             names.extend(final_new_names)
             for new_sign in new_signs:
                 if (operator == '-' and new_sign == '+') or (operator == '+' and new_sign == '-'):
@@ -2306,7 +2306,7 @@ class MultiPhaseAnalyzer(object):
             signs.extend(new_signs)
             phases.extend(new_phases)
         elif isinstance(other, PhaseAnalyzer):
-            names.append(utils.generate_phase_name(other.name, names))
+            names.append(multistate.utils.generate_phase_name(other.name, names))
             if (operator == '-' and other._sign == '+') or (operator == '+' and other._sign == '-'):
                 signs.append('-')
             else:

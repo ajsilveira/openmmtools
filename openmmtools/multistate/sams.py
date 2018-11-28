@@ -572,7 +572,7 @@ class SAMSSampler(multistate.MultiStateSampler):
                 # Advance if every state has been visited at least once
                 if np.all(N_k >= minimum_visits):
                     advance = True
-            elif self.flatness_criteria == 'flatness-threshold':
+            elif self.flatness_criteria == 'histogram-flatness':
                 # Check histogram flatness
                 empirical_pi_k = N_k[:] / N_k.sum()
                 pi_k = np.exp(self.log_target_probabilities)
@@ -587,7 +587,7 @@ class SAMSSampler(multistate.MultiStateSampler):
                 if np.all(criteria):
                     advance = True
             else:
-                raise ValueError("Unknown flatness_criteria %s" % flatness_criteria)
+                raise ValueError("Unknown flatness_criteria %s" % self.flatness_criteria)
 
             if advance or ((self._t0 > 0) and (self._iteration > self._t0)):
                 # Histograms are sufficiently flat; switch to asymptotically optimal scheme

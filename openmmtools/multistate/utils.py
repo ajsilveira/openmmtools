@@ -27,7 +27,6 @@ This code is licensed under the latest available version of the MIT License.
 import logging
 import warnings
 import numpy as np
-
 from pymbar import timeseries  # for statistical inefficiency analysis
 
 logger = logging.getLogger(__name__)
@@ -250,7 +249,7 @@ def remove_unequilibrated_data(data, number_equilibrated, axis):
     # Set the dimension we are truncating
     slc[axis] = slice(number_equilibrated, None)
     # Slice
-    equilibrated_data = cast_data[slc]
+    equilibrated_data = cast_data[tuple(slc)]
     return equilibrated_data
 
 
