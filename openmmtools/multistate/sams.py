@@ -178,6 +178,7 @@ class SAMSSampler(multistate.MultiStateSampler):
                  adapt_target_probabilities=False,
                  gamma0=1.0,
                  logZ_guess=None,
+                 interval_check=1000,
                  **kwargs):
         """Initialize a SAMS sampler.
 
@@ -229,6 +230,11 @@ class SAMSSampler(multistate.MultiStateSampler):
         self.adapt_target_probabilities = adapt_target_probabilities
         self.gamma0 = gamma0
         self.logZ_guess = logZ_guess
+        self._n = 0
+        self.interval_check = interval_check
+        self.wl_steps_stage = [0]
+        self.advance_wl = False
+        self._gain_factor = 1.0
         # Private variables
         # self._replica_neighbors[replica_index] is a list of states that form the neighborhood of ``replica_index``
         self._replica_neighbors = None
@@ -287,6 +293,7 @@ class SAMSSampler(multistate.MultiStateSampler):
     adapt_target_probabilities = _StoredProperty('adapt_target_probabilities', validate_function=_StoredProperty._adapt_target_probabilities_validator)
     gamma0 = _StoredProperty('gamma0', validate_function=None)
     logZ_guess = _StoredProperty('logZ_guess', validate_function=None)
+        interval_check =  _StoredProperty('interval_check', validate_function=None)
 
     def _initialize_stage(self):
         self._t0 = 0  # reference iteration to subtract
