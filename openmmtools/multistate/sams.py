@@ -263,7 +263,7 @@ class SAMSSampler(multistate.MultiStateSampler):
 
         @staticmethod
         def _weight_update_method_validator(instance, scheme):
-            supported_schemes = ['optimal', 'rao-blackwellized']
+            supported_schemes = ['optimal', 'rao-blackwellized', 'wang-landau']
             if scheme not in supported_schemes:
                 raise ValueError("Unknown update scheme '{}'. Supported values "
                                  "are {}.".format(scheme, supported_schemes))
@@ -562,42 +562,58 @@ class SAMSSampler(multistate.MultiStateSampler):
         Determine which adaptation stage we're in by checking histogram flatness.
 
         """
-        # TODO: Make minimum_visits a user option
-        minimum_visits = 1
+
         N_k = self._state_histogram
         logger.debug('    state histogram counts ({} total): {}'.format(self._cached_state_histogram.sum(), self._cached_state_histogram))
-        if (self.update_stages == 'two-stage') and (self._stage == 0):
-            advance = False
-            if N_k.sum() == 0:
-                # No samples yet; don't do anything.
-                return
+        if (self.weight_update_method != 'wang-landau'):
+            if (self.update_stages == 'two-stage') and (self._stage == 0):
+                advance = False
+                if N_k.sum() == 0:
+                    # No samples yet; don't do anything.
+                    return
 
-            if self.flatness_criteria == 'minimum-visits':
-                # Advance if every state has been visited at least once
-                if np.all(N_k >= minimum_visits):
-                    advance = True
-            elif self.flatness_criteria == 'histogram-flatness':
-                # Check histogram flatness
+                if self.flatness_criteria == 'minimum-visits':
+                    # Advance if every state has been visited at least once
+                    if np.all(N_k >= minimum_visits):
+                        advance = True
+                elif self.flatness_criteria == 'histogram-flatness':
+                    # Check histogram flatness
+                    empirical_pi_k = N_k[:] / N_k.sum()
+                    pi_k = np.exp(self.log_target_probabilities)
+                    relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
+                    if np.all(relative_error_k < self.flatness_threshold):
+                        advance = True
+                elif self.flatness_criteria == 'logZ-flatness':
+                    # TODO: Advance to asymptotically optimal scheme when logZ update fractional counts per state exceed threshold
+                    # for all states.
+                    criteria = abs(self._logZ / self.gamma0) > self.flatness_threshold
+                    logger.debug('logZ-flatness criteria met (%d total): %s' % (np.sum(criteria), str(np.array(criteria, 'i1'))))
+                    if np.all(criteria):
+                        advance = True
+                else:
+                    raise ValueError("Unknown flatness_criteria %s" % flatness_criteria)
+
+                if advance or ((self._t0 > 0) and (self._iteration > self._t0)):
+                    # Histograms are sufficiently flat; switch to asymptotically optimal scheme
+                    self._stage = 1 # asymptotically optimal
+                    # TODO: On resuming, we need to recompute or restore t0, or use some other way to compute it
+                    self._t0 = self._iteration - 1
+
+        else:
+            minimum_visits = 20
+            if np.all(N_k >= minimum_visits):
                 empirical_pi_k = N_k[:] / N_k.sum()
                 pi_k = np.exp(self.log_target_probabilities)
                 relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
                 if np.all(relative_error_k < self.flatness_threshold):
-                    advance = True
-            elif self.flatness_criteria == 'logZ-flatness':
-                # TODO: Advance to asymptotically optimal scheme when logZ update fractional counts per state exceed threshold
-                # for all states.
-                criteria = abs(self._logZ / self.gamma0) > self.flatness_threshold
-                logger.debug('logZ-flatness criteria met (%d total): %s' % (np.sum(criteria), str(np.array(criteria, 'i1'))))
-                if np.all(criteria):
-                    advance = True
-            else:
-                raise ValueError("Unknown flatness_criteria %s" % flatness_criteria)
+                    self._gain_factor = self._gain_factor/(2**self._n)
+                    self._n += 1
+                    self.wl_steps_stage.append(self._iteration)
+                    logger.debug('wang-landau change stage after iteration {}'.format(self.wl_steps_stage[-1]))
+                    self.advance_wl = True
+                    self._cached_state_histogram = np.zeros(self.n_states, dtype=int)
 
-            if advance or ((self._t0 > 0) and (self._iteration > self._t0)):
-                # Histograms are sufficiently flat; switch to asymptotically optimal scheme
-                self._stage = 1 # asymptotically optimal
-                # TODO: On resuming, we need to recompute or restore t0, or use some other way to compute it
-                self._t0 = self._iteration - 1
+
 
     def _update_logZ_estimates(self, replicas_log_P_k):
         """
@@ -658,12 +674,15 @@ class SAMSSampler(multistate.MultiStateSampler):
                 logZ_update = gamma * np.exp(log_P_k[neighborhood] - log_pi_k[neighborhood])
                 #logger.debug('  Rao-Blackwellized logZ increment: %s' % str(logZ_update))
                 self._logZ[neighborhood] += logZ_update
+            elif self.weight_update_method == 'wang-landau':
+                self._logZ[state_index] += self._gain_factor*1.0
             else:
                 raise Exception('Programming error: Unreachable code')
 
         # Subtract off logZ[0] to prevent logZ from growing without bound once we reach the asymptotically optimal stage
-        if self._stage == 1: # asymptotically optimal or one-stage
+        if self._stage == 1 or self.advance_wl == True: # asymptotically optimal or one-stage
             self._logZ[:] -= self._logZ[0]
+            self.advance_wl = False
 
         # Format logZ
         msg = '  logZ: ['
