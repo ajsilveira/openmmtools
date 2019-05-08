@@ -293,7 +293,7 @@ class SAMSSampler(multistate.MultiStateSampler):
     adapt_target_probabilities = _StoredProperty('adapt_target_probabilities', validate_function=_StoredProperty._adapt_target_probabilities_validator)
     gamma0 = _StoredProperty('gamma0', validate_function=None)
     logZ_guess = _StoredProperty('logZ_guess', validate_function=None)
-        interval_check =  _StoredProperty('interval_check', validate_function=None)
+    interval_check =  _StoredProperty('interval_check', validate_function=None)
 
     def _initialize_stage(self):
         self._t0 = 0  # reference iteration to subtract
