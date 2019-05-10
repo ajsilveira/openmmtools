@@ -339,7 +339,7 @@ class SAMSSampler(multistate.MultiStateSampler):
         metadata : dict, optional
            Simulation metadata to be stored in the file.
         """
-        # Initialize replica-exchange simulation.
+
         super()._pre_write_create(thermodynamic_states, sampler_states, storage=storage, **kwargs)
 
         if self.state_update_scheme == 'global-jump':
@@ -559,10 +559,14 @@ class SAMSSampler(multistate.MultiStateSampler):
         """ Compute state histogram from disk"""
         if reporter is None:
             reporter = self._reporter
-        replica_thermodynamic_states = reporter.read_replica_thermodynamic_states()
+        if (self.wl_steps_stage[-1] != 0):
+            replica_thermodynamic_states = reporter.read_replica_thermodynamic_states(slice(-self.wl_steps_stage[-1],None))
+        else:
+            replica_thermodynamic_states = reporter.read_replica_thermodynamic_states()
         logger.debug('Read replica thermodynamic states: {}'.format(replica_thermodynamic_states))
         n_k, _ = np.histogram(replica_thermodynamic_states, bins=np.arange(-0.5, self.n_states + 0.5))
         return n_k
+
 
     def _update_stage(self):
         """
