@@ -173,7 +173,7 @@ class SAMSSampler(multistate.MultiStateSampler):
                  locality=5,
                  update_stages='two-stage',
                  flatness_criteria='logZ-flatness',
-                 flatness_threshold=0.2,
+                 flatness_threshold=0.5,
                  weight_update_method='rao-blackwellized',
                  adapt_target_probabilities=False,
                  gamma0=1.0,
@@ -372,13 +372,16 @@ class SAMSSampler(multistate.MultiStateSampler):
 
     def _restore_sampler_from_reporter(self, reporter):
         super()._restore_sampler_from_reporter(reporter)
+        data = reporter.read_online_analysis_data(self._iteration, 'logZ', 'stage', 't0',
+                                                  'n', 'gain_factor', 'wl_steps_stage')
+        self.wl_steps_stage = int(data['wl_steps_stage'])
         self._cached_state_histogram = self._compute_state_histogram(reporter=reporter)
         logger.debug('Restored state histogram: {}'.format(self._cached_state_histogram))
-        data = reporter.read_online_analysis_data(self._iteration, 'logZ', 'stage', 't0')
         self._logZ = data['logZ']
         self._stage = int(data['stage'][0])
         self._t0 = int(data['t0'][0])
-
+        self._n = int(data['n'][0])
+        self._gain_factor = data['gain_factor']
         # Compute log weights from log target probability and logZ estimate
         self._update_log_weights()
 
@@ -390,7 +393,8 @@ class SAMSSampler(multistate.MultiStateSampler):
     def _report_iteration_items(self):
         super(SAMSSampler, self)._report_iteration_items()
 
-        self._reporter.write_online_data_dynamic_and_static(self._iteration, logZ=self._logZ, stage=self._stage, t0=self._t0)
+        self._reporter.write_online_data_dynamic_and_static(self._iteration, logZ=self._logZ, stage=self._stage, t0=self._t0,
+                                                            n=self._n, gain_factor=self._gain_factor, wl_steps_stage=self.wl_steps_stage)
         # Split into which states and how many samplers are in each state
         # Trying to do histogram[replica_thermo_states] += 1 does not correctly handle multiple
         # replicas in the same state.
@@ -560,7 +564,7 @@ class SAMSSampler(multistate.MultiStateSampler):
         if reporter is None:
             reporter = self._reporter
         if (self.wl_steps_stage[-1] != 0):
-            replica_thermodynamic_states = reporter.read_replica_thermodynamic_states(slice(-self.wl_steps_stage[-1],None))
+            replica_thermodynamic_states = reporter.read_replica_thermodynamic_states(slice(self.wl_steps_stage[-1],None))
         else:
             replica_thermodynamic_states = reporter.read_replica_thermodynamic_states()
         logger.debug('Read replica thermodynamic states: {}'.format(replica_thermodynamic_states))
@@ -617,10 +621,11 @@ class SAMSSampler(multistate.MultiStateSampler):
                 pi_k = np.exp(self.log_target_probabilities)
                 relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
                 if np.all(relative_error_k < self.flatness_threshold):
-                    self._gain_factor = self._gain_factor/(2**self._n)
                     self._n += 1
+                    self._gain_factor = self._gain_factor/(2**self._n)
                     self.wl_steps_stage.append(self._iteration)
                     logger.debug('wang-landau change stage after iteration {}'.format(self.wl_steps_stage[-1]))
+                    logger.debug('wang-landau gain factor is {}'.format(self._gain_factor))
                     self.advance_wl = True
                     self._cached_state_histogram = np.zeros(self.n_states, dtype=int)
 
@@ -655,7 +660,7 @@ class SAMSSampler(multistate.MultiStateSampler):
         for (replica_index, state_index) in enumerate(self._replica_thermodynamic_states):
             logger.debug(' Replica %d state %d' % (replica_index, state_index))
             # Compute attenuation factor gamma
-            beta_factor = 0.8
+            beta_factor = 0.6
             pi_star = pi_k.min()
             t = float(self._iteration)
             if self._stage == 0: # initial stage
