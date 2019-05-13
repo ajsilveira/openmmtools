@@ -374,7 +374,7 @@ class SAMSSampler(multistate.MultiStateSampler):
         super()._restore_sampler_from_reporter(reporter)
         data = reporter.read_online_analysis_data(self._iteration, 'logZ', 'stage', 't0',
                                                   'n', 'gain_factor', 'wl_steps_stage')
-        self.wl_steps_stage = int(data['wl_steps_stage'])
+        self.wl_steps_stage = data['wl_steps_stage']
         self._cached_state_histogram = self._compute_state_histogram(reporter=reporter)
         logger.debug('Restored state histogram: {}'.format(self._cached_state_histogram))
         self._logZ = data['logZ']
@@ -563,8 +563,8 @@ class SAMSSampler(multistate.MultiStateSampler):
         """ Compute state histogram from disk"""
         if reporter is None:
             reporter = self._reporter
-        if (self.wl_steps_stage[-1] != 0):
-            replica_thermodynamic_states = reporter.read_replica_thermodynamic_states(slice(self.wl_steps_stage[-1],None))
+        if (int(self.wl_steps_stage[-1]) != 0):
+            replica_thermodynamic_states = reporter.read_replica_thermodynamic_states(slice(int(self.wl_steps_stage[-1]),None))
         else:
             replica_thermodynamic_states = reporter.read_replica_thermodynamic_states()
         logger.debug('Read replica thermodynamic states: {}'.format(replica_thermodynamic_states))
