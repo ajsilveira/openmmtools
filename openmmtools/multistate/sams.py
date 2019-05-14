@@ -374,7 +374,7 @@ class SAMSSampler(multistate.MultiStateSampler):
         super()._restore_sampler_from_reporter(reporter)
         data = reporter.read_online_analysis_data(self._iteration, 'logZ', 'stage', 't0',
                                                   'n', 'gain_factor', 'wl_steps_stage')
-        self.wl_steps_stage = data['wl_steps_stage']
+        self.wl_steps_stage = [17867]
         self._cached_state_histogram = self._compute_state_histogram(reporter=reporter)
         logger.debug('Restored state histogram: {}'.format(self._cached_state_histogram))
         self._logZ = data['logZ']
@@ -382,6 +382,7 @@ class SAMSSampler(multistate.MultiStateSampler):
         self._t0 = int(data['t0'][0])
         self._n = int(data['n'][0])
         self._gain_factor = data['gain_factor']
+        logger.debug('gain factor is {}'.format(self._gain_factor))
         # Compute log weights from log target probability and logZ estimate
         self._update_log_weights()
 
@@ -394,7 +395,7 @@ class SAMSSampler(multistate.MultiStateSampler):
         super(SAMSSampler, self)._report_iteration_items()
 
         self._reporter.write_online_data_dynamic_and_static(self._iteration, logZ=self._logZ, stage=self._stage, t0=self._t0,
-                                                            n=self._n, gain_factor=self._gain_factor, wl_steps_stage=self.wl_steps_stage)
+                                                            n=self._n, gain_factor=self._gain_factor, wl_steps_stage=self.wl_steps_stage[-1])
         # Split into which states and how many samplers are in each state
         # Trying to do histogram[replica_thermo_states] += 1 does not correctly handle multiple
         # replicas in the same state.
