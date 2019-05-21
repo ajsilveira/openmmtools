@@ -230,7 +230,6 @@ class SAMSSampler(multistate.MultiStateSampler):
         self.adapt_target_probabilities = adapt_target_probabilities
         self.gamma0 = gamma0
         self.logZ_guess = logZ_guess
-        self._n = 0
         self.interval_check = interval_check
         self.wl_steps_stage = [0]
         self.advance_wl = False
@@ -373,16 +372,15 @@ class SAMSSampler(multistate.MultiStateSampler):
     def _restore_sampler_from_reporter(self, reporter):
         super()._restore_sampler_from_reporter(reporter)
         data = reporter.read_online_analysis_data(self._iteration, 'logZ', 'stage', 't0',
-                                                  'n', 'gain_factor', 'wl_steps_stage')
-        self.wl_steps_stage = [17867]
+                                                  'gain_factor', 'wl_steps_stage')
+        self.wl_steps_stage = [data['wl_steps_stage'][0]]
         self._cached_state_histogram = self._compute_state_histogram(reporter=reporter)
         logger.debug('Restored state histogram: {}'.format(self._cached_state_histogram))
         self._logZ = data['logZ']
         self._stage = int(data['stage'][0])
         self._t0 = int(data['t0'][0])
-        self._n = int(data['n'][0])
-        self._gain_factor = data['gain_factor']
-        logger.debug('gain factor is {}'.format(self._gain_factor))
+        self._gain_factor = data['gain_factor'][0]
+
         # Compute log weights from log target probability and logZ estimate
         self._update_log_weights()
 
@@ -395,7 +393,7 @@ class SAMSSampler(multistate.MultiStateSampler):
         super(SAMSSampler, self)._report_iteration_items()
 
         self._reporter.write_online_data_dynamic_and_static(self._iteration, logZ=self._logZ, stage=self._stage, t0=self._t0,
-                                                            n=self._n, gain_factor=self._gain_factor, wl_steps_stage=self.wl_steps_stage[-1])
+                                                            gain_factor=self._gain_factor, wl_steps_stage=self.wl_steps_stage[-1])
         # Split into which states and how many samplers are in each state
         # Trying to do histogram[replica_thermo_states] += 1 does not correctly handle multiple
         # replicas in the same state.
@@ -564,8 +562,8 @@ class SAMSSampler(multistate.MultiStateSampler):
         """ Compute state histogram from disk"""
         if reporter is None:
             reporter = self._reporter
-        if (int(self.wl_steps_stage[-1]) != 0):
-            replica_thermodynamic_states = reporter.read_replica_thermodynamic_states(slice(int(self.wl_steps_stage[-1]),None))
+        if (self.wl_steps_stage[-1] != 0):
+            replica_thermodynamic_states = reporter.read_replica_thermodynamic_states(slice(self.wl_steps_stage[-1],None))
         else:
             replica_thermodynamic_states = reporter.read_replica_thermodynamic_states()
         logger.debug('Read replica thermodynamic states: {}'.format(replica_thermodynamic_states))
@@ -589,6 +587,7 @@ class SAMSSampler(multistate.MultiStateSampler):
                     return
 
                 if self.flatness_criteria == 'minimum-visits':
+                    minimum_visits = 50
                     # Advance if every state has been visited at least once
                     if np.all(N_k >= minimum_visits):
                         advance = True
@@ -622,8 +621,7 @@ class SAMSSampler(multistate.MultiStateSampler):
                 pi_k = np.exp(self.log_target_probabilities)
                 relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
                 if np.all(relative_error_k < self.flatness_threshold):
-                    self._n += 1
-                    self._gain_factor = self._gain_factor/(2**self._n)
+                    self._gain_factor = self._gain_factor/2.0
                     self.wl_steps_stage.append(self._iteration)
                     logger.debug('wang-landau change stage after iteration {}'.format(self.wl_steps_stage[-1]))
                     logger.debug('wang-landau gain factor is {}'.format(self._gain_factor))

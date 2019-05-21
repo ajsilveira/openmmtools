@@ -1120,6 +1120,7 @@ class MultiStateSampler(object):
         self._reporter.write_mcmc_moves(self._mcmc_moves)  # MCMCMoves can store internal statistics.
         self._reporter.write_energies(self._energy_thermodynamic_states, self._neighborhoods, self._energy_unsampled_states,
                                       self._iteration)
+        logger.debug('size of accepted matrix is {}'.format(self._n_accepted_matrix.shape))
         self._reporter.write_mixing_statistics(self._n_accepted_matrix, self._n_proposed_matrix, self._iteration)
 
     @classmethod
