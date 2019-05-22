@@ -260,7 +260,7 @@ class SAMSSampler(multistate.MultiStateSampler):
 
         @staticmethod
         def _flatness_criteria_validator(instance, scheme):
-            supported_schemes = ['minimum-visits', 'logZ-flatness', 'histogram-flatness']
+            supported_schemes = ['minimum-visits', 'logZ-flatness', 'histogram-flatness', 'round-trip']
             if scheme not in supported_schemes:
                 raise ValueError("Unknown update scheme '{}'. Supported values "
                                  "are {}.".format(scheme, supported_schemes))
@@ -295,6 +295,8 @@ class SAMSSampler(multistate.MultiStateSampler):
     interval_check =  _StoredProperty('interval_check', validate_function=None)
 
     def _initialize_stage(self):
+        self.walker =[]
+        self.round_trips = 0
         self._t0 = 0  # reference iteration to subtract
         if self.update_stages == 'one-stage':
             self._stage = 1 # start with asymptotically-optimal stage
@@ -372,7 +374,8 @@ class SAMSSampler(multistate.MultiStateSampler):
     def _restore_sampler_from_reporter(self, reporter):
         super()._restore_sampler_from_reporter(reporter)
         data = reporter.read_online_analysis_data(self._iteration, 'logZ', 'stage', 't0',
-                                                  'gain_factor', 'wl_steps_stage')
+                                                  'gain_factor', 'wl_steps_stage', 'round_trips'
+                                                  'walker_initial_index','walker_last_index')
         self.wl_steps_stage = [data['wl_steps_stage'][0]]
         self._cached_state_histogram = self._compute_state_histogram(reporter=reporter)
         logger.debug('Restored state histogram: {}'.format(self._cached_state_histogram))
@@ -380,6 +383,9 @@ class SAMSSampler(multistate.MultiStateSampler):
         self._stage = int(data['stage'][0])
         self._t0 = int(data['t0'][0])
         self._gain_factor = data['gain_factor'][0]
+        self.round_trips = int(data['round_trips'][0])
+        self.walker_initial_index = int(data['walker_initial_index'][0])
+        self.walker = [int(data['walker_last_index'][0])]
 
         # Compute log weights from log target probability and logZ estimate
         self._update_log_weights()
@@ -393,7 +399,9 @@ class SAMSSampler(multistate.MultiStateSampler):
         super(SAMSSampler, self)._report_iteration_items()
 
         self._reporter.write_online_data_dynamic_and_static(self._iteration, logZ=self._logZ, stage=self._stage, t0=self._t0,
-                                                            gain_factor=self._gain_factor, wl_steps_stage=self.wl_steps_stage[-1])
+                                                            gain_factor=self._gain_factor, wl_steps_stage=self.wl_steps_stage[-1],
+                                                            walker_initial_index=self.walker_initial_index,
+                                                            walker_last_index=self.walker[-1])
         # Split into which states and how many samplers are in each state
         # Trying to do histogram[replica_thermo_states] += 1 does not correctly handle multiple
         # replicas in the same state.
@@ -485,8 +493,21 @@ class SAMSSampler(multistate.MultiStateSampler):
         Global jump scheme.
         This method is described after Eq. 3 in [2]
         """
+
+
         n_replica, n_states = self.n_replicas, self.n_states
         for replica_index, current_state_index in enumerate(self._replica_thermodynamic_states):
+
+            if (current_state_index == 0) or (current_state_index == self.nstates-1):
+                if len(self.walker) == 0:
+                    self.walker_initial_index == current_state_index
+                    self.walker.append(current_state_index)
+                else:
+                    self.walker.append(current_state_index)
+            else:
+                self.walker.append(self.walker[-1])
+            if (self.walker[-1] != self.walker[-2]) and (self.walker[-1] == self.walker_initial_index):
+                self.round_trips += 1
             neighborhood = self._neighborhood(current_state_index)
 
             # Compute unnormalized log probabilities for all thermodynamic states.
@@ -579,6 +600,7 @@ class SAMSSampler(multistate.MultiStateSampler):
 
         N_k = self._state_histogram
         logger.debug('    state histogram counts ({} total): {}'.format(self._cached_state_histogram.sum(), self._cached_state_histogram))
+        logger.debug(' round trips: {}'.format(self.round_trips))
         if (self.weight_update_method != 'wang-landau'):
             if (self.update_stages == 'two-stage') and (self._stage == 0):
                 advance = False
@@ -615,18 +637,38 @@ class SAMSSampler(multistate.MultiStateSampler):
                     self._t0 = self._iteration - 1
 
         else:
-            minimum_visits = 20
-            if np.all(N_k >= minimum_visits):
-                empirical_pi_k = N_k[:] / N_k.sum()
-                pi_k = np.exp(self.log_target_probabilities)
-                relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
-                if np.all(relative_error_k < self.flatness_threshold):
-                    self._gain_factor = self._gain_factor/2.0
-                    self.wl_steps_stage.append(self._iteration)
-                    logger.debug('wang-landau change stage after iteration {}'.format(self.wl_steps_stage[-1]))
-                    logger.debug('wang-landau gain factor is {}'.format(self._gain_factor))
-                    self.advance_wl = True
-                    self._cached_state_histogram = np.zeros(self.n_states, dtype=int)
+            if (flatness_criteria == 'round-trip'):
+                if (self.round_trips >= 1):
+                    minimum_visits = 50
+                    if np.all(N_k >= minimum_visits):
+                        empirical_pi_k = N_k[:] / N_k.sum()
+                        pi_k = np.exp(self.log_target_probabilities)
+                        relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
+                        if np.all(relative_error_k < self.flatness_threshold):
+                            self._gain_factor = self._gain_factor/2.0
+                            self.wl_steps_stage.append(self._iteration)
+                            logger.debug('wang-landau change stage after iteration {}'.format(self.wl_steps_stage[-1]))
+                            logger.debug('wang-landau gain factor is {}'.format(self._gain_factor))
+                            self.advance_wl = True
+                            self._cached_state_histogram = np.zeros(self.n_states, dtype=int)
+                            self.round_trips = 0
+                            self.walker_initial_index = self.walker[-1]
+                            self.walker_last_index = self.walker[-1]
+                            self.walker=[self.walker[-1]]
+
+            else:
+                minimum_visits = 50
+                if np.all(N_k >= minimum_visits):
+                    empirical_pi_k = N_k[:] / N_k.sum()
+                    pi_k = np.exp(self.log_target_probabilities)
+                    relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
+                    if np.all(relative_error_k < self.flatness_threshold):
+                        self._gain_factor = self._gain_factor/2.0
+                        self.wl_steps_stage.append(self._iteration)
+                        logger.debug('wang-landau change stage after iteration {}'.format(self.wl_steps_stage[-1]))
+                        logger.debug('wang-landau gain factor is {}'.format(self._gain_factor))
+                        self.advance_wl = True
+                        self._cached_state_histogram = np.zeros(self.n_states, dtype=int)
 
 
 
