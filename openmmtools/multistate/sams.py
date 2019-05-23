@@ -295,7 +295,7 @@ class SAMSSampler(multistate.MultiStateSampler):
     interval_check =  _StoredProperty('interval_check', validate_function=None)
 
     def _initialize_stage(self):
-        self.walker =[]
+        self.walker =[0]
         self.round_trips = 0
         self._t0 = 0  # reference iteration to subtract
         if self.update_stages == 'one-stage':
@@ -370,7 +370,7 @@ class SAMSSampler(multistate.MultiStateSampler):
 
         # Update log weights
         self._update_log_weights()
-
+        self.walker_initial_index = 0
     def _restore_sampler_from_reporter(self, reporter):
         super()._restore_sampler_from_reporter(reporter)
         data = reporter.read_online_analysis_data(self._iteration, 'logZ', 'stage', 't0',
@@ -494,20 +494,15 @@ class SAMSSampler(multistate.MultiStateSampler):
         This method is described after Eq. 3 in [2]
         """
 
-
         n_replica, n_states = self.n_replicas, self.n_states
         for replica_index, current_state_index in enumerate(self._replica_thermodynamic_states):
-
-            if (current_state_index == 0) or (current_state_index == self.nstates-1):
-                if len(self.walker) == 0:
-                    self.walker_initial_index == current_state_index
-                    self.walker.append(current_state_index)
-                else:
-                    self.walker.append(current_state_index)
+            if (current_state_index == 0) or (current_state_index == self.n_states-1):
+                self.walker.append(current_state_index)
             else:
                 self.walker.append(self.walker[-1])
-            if (self.walker[-1] != self.walker[-2]) and (self.walker[-1] == self.walker_initial_index):
-                self.round_trips += 1
+            if (len(self.walker) > 1):
+                if (self.walker[-1] != self.walker[-2]) and (self.walker[-1] == self.walker_initial_index):
+                    self.round_trips += 1
             neighborhood = self._neighborhood(current_state_index)
 
             # Compute unnormalized log probabilities for all thermodynamic states.
@@ -637,7 +632,7 @@ class SAMSSampler(multistate.MultiStateSampler):
                     self._t0 = self._iteration - 1
 
         else:
-            if (flatness_criteria == 'round-trip'):
+            if (self.flatness_criteria == 'round-trip'):
                 if (self.round_trips >= 1):
                     minimum_visits = 50
                     if np.all(N_k >= minimum_visits):
