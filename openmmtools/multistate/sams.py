@@ -173,7 +173,7 @@ class SAMSSampler(multistate.MultiStateSampler):
                  locality=5,
                  update_stages='two-stage',
                  flatness_criteria='logZ-flatness',
-                 flatness_threshold=0.5,
+                 flatness_threshold=0.3,
                  weight_update_method='rao-blackwellized',
                  adapt_target_probabilities=False,
                  gamma0=1.0,
@@ -374,7 +374,7 @@ class SAMSSampler(multistate.MultiStateSampler):
     def _restore_sampler_from_reporter(self, reporter):
         super()._restore_sampler_from_reporter(reporter)
         data = reporter.read_online_analysis_data(self._iteration, 'logZ', 'stage', 't0',
-                                                  'gain_factor', 'wl_steps_stage', 'round_trips'
+                                                  'gain_factor', 'wl_steps_stage',
                                                   'walker_initial_index','walker_last_index')
         self.wl_steps_stage = [data['wl_steps_stage'][0]]
         self._cached_state_histogram = self._compute_state_histogram(reporter=reporter)
@@ -383,10 +383,10 @@ class SAMSSampler(multistate.MultiStateSampler):
         self._stage = int(data['stage'][0])
         self._t0 = int(data['t0'][0])
         self._gain_factor = data['gain_factor'][0]
-        self.round_trips = int(data['round_trips'][0])
+        #self.round_trips = int(data['round_trips'][0])
         self.walker_initial_index = int(data['walker_initial_index'][0])
         self.walker = [int(data['walker_last_index'][0])]
-
+        self.round_trips = 1
         # Compute log weights from log target probability and logZ estimate
         self._update_log_weights()
 
@@ -400,6 +400,7 @@ class SAMSSampler(multistate.MultiStateSampler):
 
         self._reporter.write_online_data_dynamic_and_static(self._iteration, logZ=self._logZ, stage=self._stage, t0=self._t0,
                                                             gain_factor=self._gain_factor, wl_steps_stage=self.wl_steps_stage[-1],
+                                                            round_trips=self.round_trips,                                         
                                                             walker_initial_index=self.walker_initial_index,
                                                             walker_last_index=self.walker[-1])
         # Split into which states and how many samplers are in each state
@@ -602,8 +603,14 @@ class SAMSSampler(multistate.MultiStateSampler):
                 if N_k.sum() == 0:
                     # No samples yet; don't do anything.
                     return
-
-                if self.flatness_criteria == 'minimum-visits':
+                if (self.flatness_criteria == 'round-trip'):
+                    if (self.round_trips >= 1):
+                        empirical_pi_k = N_k[:] / N_k.sum()
+                        pi_k = np.exp(self.log_target_probabilities)
+                        relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
+                        if np.all(relative_error_k < self.flatness_threshold):
+                            advance = True
+                elif self.flatness_criteria == 'minimum-visits':
                     minimum_visits = 50
                     # Advance if every state has been visited at least once
                     if np.all(N_k >= minimum_visits):
@@ -630,6 +637,7 @@ class SAMSSampler(multistate.MultiStateSampler):
                     self._stage = 1 # asymptotically optimal
                     # TODO: On resuming, we need to recompute or restore t0, or use some other way to compute it
                     self._t0 = self._iteration - 1
+                    logger.debug('sams changed state after {} iterations'.format(self._t0))
 
         else:
             if (self.flatness_criteria == 'round-trip'):
