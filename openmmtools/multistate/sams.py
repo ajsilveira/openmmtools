@@ -55,6 +55,8 @@ class SAMSSampler(multistate.MultiStateSampler):
         Thermodynamic state sampling scheme. One of ['global-jump', 'local-jump', 'restricted-range']
     locality : int
         Number of neighboring states on either side to consider for local update schemes
+    weight_update : bool, default=True
+        If False, weights updating is disabled. This allows to perform expanded ensemble simulations.
     update_stages : str
         Number of stages to use for update. One of ['one-stage', 'two-stage']
     weight_update_method : str
@@ -102,8 +104,8 @@ class SAMSSampler(multistate.MultiStateSampler):
     >>> move = mcmc.GHMCMove(timestep=2.0*unit.femtoseconds, n_steps=50)
     >>> simulation = SAMSSampler(mcmc_moves=move, number_of_iterations=2,
     ...                          state_update_scheme='global-jump', locality=5,
-    ...                          update_stages='two-stage', flatness_criteria='logZ-flatness',
-    ...                          flatness_threshold=0.2, weight_update_method='rao-blackwellized',
+    ...                          update_stages='two-stage', flatness_histogram=0.5,
+    ...                          weight_update_method='rao-blackwellized',
     ...                          adapt_target_probabilities=False)
 
 
@@ -169,16 +171,19 @@ class SAMSSampler(multistate.MultiStateSampler):
     def __init__(self,
                  number_of_iterations=1,
                  log_target_probabilities=None,
+                 weight_update=True,
                  state_update_scheme='global-jump',
                  locality=5,
                  update_stages='two-stage',
-                 flatness_criteria='logZ-flatness',
-                 flatness_threshold=0.3,
+                 histogram_flatness = None,
+                 minimum_visits = None,
+                 minimum_round_trips = None,
+                 minimum_logZ = None,
+                 beta_factor=0.8,
                  weight_update_method='rao-blackwellized',
                  adapt_target_probabilities=False,
                  gamma0=1.0,
                  logZ_guess=None,
-                 interval_check=1000,
                  **kwargs):
         """Initialize a SAMS sampler.
 
@@ -200,11 +205,16 @@ class SAMSSampler(multistate.MultiStateSampler):
             One of ['one-stage', 'two-stage']
             ``one-stage`` will use the asymptotically optimal scheme throughout the entire simulation (not recommended due to slow convergence)
             ``two-stage`` will use a heuristic first stage to achieve flat histograms before switching to the asymptotically optimal scheme
-        flatness_criteria : string, optiona, default='logZ-flatness'
-            Method of assessing when to switch to asymptotically optimal scheme
-             One of ['logZ-flatness','minimum-visits','histogram-flatness']
-        flatness_threshold : float, optional, default=0.2
-            Histogram relative flatness threshold to use for first stage of two-stage scheme.
+        histogram_flatness: float, default=None
+             Histogram relative flatness threshold to use in first stage of two-stage scheme.
+        minimum_round_trips : int, default=None
+             Minimum number of round trips to use in first stage of two-stage scheme.
+        minimum_visits : int, default=None
+            Minimum number of visits in each state to use in first stage of two-stage scheme.
+        minimum_logZ : float, default=None
+            Minimum logZ value to use in first stage of two-stage scheme.
+        beta_factor :  float, optional, default=0.8
+            Exponent for tunning the decaying rate of the gain factor.
         weight_update_method : str, optional, default='rao-blackwellized'
             Method to use for updating log weights in SAMS. One of ['optimal', 'rao-blackwellized']
             ``rao-blackwellized`` will update log free energy estimate for all states for which energies were computed
@@ -212,7 +222,7 @@ class SAMSSampler(multistate.MultiStateSampler):
         adapt_target_probabilities : bool, optional, default=False
             If True, target probabilities will be adapted to achieve minimal thermodynamic length between terminal thermodynamic states.
             (EXPERIMENTAL)
-        gamma0 : float, optional, default=0.0
+        gamma0 : float, optional, default=1.0
             Initial weight adaptation rate.
         logZ_guess : array-like of shape [n_states] of floats, optiona, default=None
             Initial guess for logZ for all states, if available.
@@ -222,15 +232,18 @@ class SAMSSampler(multistate.MultiStateSampler):
         # Options
         self.log_target_probabilities = log_target_probabilities
         self.state_update_scheme = state_update_scheme
+        self.weight_update = weight_update
         self.locality = locality
         self.update_stages = update_stages
-        self.flatness_criteria = flatness_criteria
-        self.flatness_threshold = flatness_threshold
+        self.histogram_flatness = histogram_flatness
+        self.minimum_round_trips = minimum_round_trips
+        self.minimum_visits = minimum_visits
+        self.minimum_logZ = minimum_logZ
+        self.beta_factor = beta_factor
         self.weight_update_method = weight_update_method
         self.adapt_target_probabilities = adapt_target_probabilities
         self.gamma0 = gamma0
         self.logZ_guess = logZ_guess
-        self.interval_check = interval_check
         self.wl_steps_stage = [0]
         self.advance_wl = False
         self._gain_factor = 1.0
@@ -238,6 +251,19 @@ class SAMSSampler(multistate.MultiStateSampler):
         # self._replica_neighbors[replica_index] is a list of states that form the neighborhood of ``replica_index``
         self._replica_neighbors = None
         self._cached_state_histogram = None
+
+        self._advance = {criteria: False for criteria, value in self._criteria.items() if value is not None}
+        if self.weight_update and (self.update_stages == 'two-stage') and not bool(self._criteria):
+             raise Exception('One or multiple criteria for switching stages must be specified. Supported criteria are: histogram_flatness, minimum_round_trips, minimum_logZ and minimum_visits')
+
+    @property
+    def _criteria(self):
+        return { criteria: value for criteria, value in (('histogram_flatness', self.histogram_flatness),
+                                                          ('minimum_round_trips', self.minimum_round_trips),
+                                                          ('minimum_logZ', self.minimum_logZ),
+                                                          ('minimum_visits', self.minimum_visits))
+                                                          if value is not None}
+
 
     class _StoredProperty(multistate.MultiStateSampler._StoredProperty):
 
@@ -253,14 +279,6 @@ class SAMSSampler(multistate.MultiStateSampler):
         @staticmethod
         def _update_stages_validator(instance, scheme):
             supported_schemes = ['one-stage', 'two-stage']
-            if scheme not in supported_schemes:
-                raise ValueError("Unknown update scheme '{}'. Supported values "
-                                 "are {}.".format(scheme, supported_schemes))
-            return scheme
-
-        @staticmethod
-        def _flatness_criteria_validator(instance, scheme):
-            supported_schemes = ['minimum-visits', 'logZ-flatness', 'histogram-flatness', 'round-trip']
             if scheme not in supported_schemes:
                 raise ValueError("Unknown update scheme '{}'. Supported values "
                                  "are {}.".format(scheme, supported_schemes))
@@ -284,19 +302,25 @@ class SAMSSampler(multistate.MultiStateSampler):
 
     log_target_probabilities = _StoredProperty('log_target_probabilities', validate_function=None)
     state_update_scheme = _StoredProperty('state_update_scheme', validate_function=_StoredProperty._state_update_scheme_validator)
+    weight_update = _StoredProperty('weight_update', validate_function=None)
     locality = _StoredProperty('locality', validate_function=None)
     update_stages = _StoredProperty('update_stages', validate_function=_StoredProperty._update_stages_validator)
-    flatness_criteria = _StoredProperty('flatness_criteria', validate_function=_StoredProperty._flatness_criteria_validator)
-    flatness_threshold = _StoredProperty('flatness_threshold', validate_function=None)
     weight_update_method = _StoredProperty('weight_update_method', validate_function=_StoredProperty._weight_update_method_validator)
     adapt_target_probabilities = _StoredProperty('adapt_target_probabilities', validate_function=_StoredProperty._adapt_target_probabilities_validator)
+    histogram_flatness = _StoredProperty('histogram_flatness', validate_function=None)
+    minimum_round_trips = _StoredProperty('minimum_round_trips', validate_function=None)
+    minimum_visits = _StoredProperty('minimum_visits', validate_function=None)
+    minimum_logZ = _StoredProperty('minimum_logZ', validate_function=None)
+    beta_factor = _StoredProperty('beta_factor', validate_function=None)
     gamma0 = _StoredProperty('gamma0', validate_function=None)
     logZ_guess = _StoredProperty('logZ_guess', validate_function=None)
-    interval_check =  _StoredProperty('interval_check', validate_function=None)
 
     def _initialize_stage(self):
-        self.walker =[0]
-        self.round_trips = 0
+        self._round_trips = 0
+        # The variable _downhill keeps track of which end state the walker has visited more recently.
+        # This is used for computing the number of round trips.
+        # _downhill = False: the walker is going uphill because it has visited the intial state more recently than the final state
+        self._downhill = False
         self._t0 = 0  # reference iteration to subtract
         if self.update_stages == 'one-stage':
             self._stage = 1 # start with asymptotically-optimal stage
@@ -370,12 +394,12 @@ class SAMSSampler(multistate.MultiStateSampler):
 
         # Update log weights
         self._update_log_weights()
-        self.walker_initial_index = 0
+
     def _restore_sampler_from_reporter(self, reporter):
         super()._restore_sampler_from_reporter(reporter)
         data = reporter.read_online_analysis_data(self._iteration, 'logZ', 'stage', 't0',
-                                                  'gain_factor', 'wl_steps_stage',
-                                                  'walker_initial_index','walker_last_index')
+                                                  'round_trips','downhill',
+                                                  'gain_factor', 'wl_steps_stage')
         self.wl_steps_stage = [data['wl_steps_stage'][0]]
         self._cached_state_histogram = self._compute_state_histogram(reporter=reporter)
         logger.debug('Restored state histogram: {}'.format(self._cached_state_histogram))
@@ -383,15 +407,14 @@ class SAMSSampler(multistate.MultiStateSampler):
         self._stage = int(data['stage'][0])
         self._t0 = int(data['t0'][0])
         self._gain_factor = data['gain_factor'][0]
-        #self.round_trips = int(data['round_trips'][0])
-        self.walker_initial_index = int(data['walker_initial_index'][0])
-        self.walker = [int(data['walker_last_index'][0])]
-        self.round_trips = 1
+        self._round_trips = int(data['round_trips'][0])
+        self._downhill = bool(int(data['downhill'][0]))
         # Compute log weights from log target probability and logZ estimate
         self._update_log_weights()
 
-        # Determine t0
-        self._update_stage()
+        if self.weight_update:
+            # Determine t0
+            self._update_stage()
 
     @mpiplus.on_single_node(rank=0, broadcast_result=False, sync_nodes=False)
     @mpiplus.delayed_termination
@@ -400,9 +423,7 @@ class SAMSSampler(multistate.MultiStateSampler):
 
         self._reporter.write_online_data_dynamic_and_static(self._iteration, logZ=self._logZ, stage=self._stage, t0=self._t0,
                                                             gain_factor=self._gain_factor, wl_steps_stage=self.wl_steps_stage[-1],
-                                                            round_trips=self.round_trips,                                         
-                                                            walker_initial_index=self.walker_initial_index,
-                                                            walker_last_index=self.walker[-1])
+                                                            round_trips=self._round_trips, downhill=int(self._downhill))
         # Split into which states and how many samplers are in each state
         # Trying to do histogram[replica_thermo_states] += 1 does not correctly handle multiple
         # replicas in the same state.
@@ -435,6 +456,13 @@ class SAMSSampler(multistate.MultiStateSampler):
             else:
                 raise Exception('Programming error: Unreachable code')
 
+        for replica_index, current_state_index in enumerate(self._replica_thermodynamic_states):
+            if self._downhill:
+                if current_state_index == 0:
+                    self._round_trips += 1
+                    self._downhill = False
+            elif current_state_index == self.n_states-1:
+                self._downhill = True
         # Determine fraction of swaps accepted this iteration.
         n_swaps_proposed = self._n_proposed_matrix.sum()
         n_swaps_accepted = self._n_accepted_matrix.sum()
@@ -444,12 +472,15 @@ class SAMSSampler(multistate.MultiStateSampler):
             swap_fraction_accepted = float(n_swaps_accepted) / n_swaps_proposed
         logger.debug("Accepted {}/{} attempted swaps ({:.1f}%)".format(n_swaps_accepted, n_swaps_proposed,
                                                                        swap_fraction_accepted * 100.0))
+        if self.weight_update:
+            # Update logZ estimates
+            self._update_logZ_estimates(replicas_log_P_k)
 
-        # Update logZ estimates
-        self._update_logZ_estimates(replicas_log_P_k)
+            # Update log weights based on target probabilities
+            self._update_log_weights()
+        else:
+            logger.debug('    state histogram counts ({} total): {}'.format(self._cached_state_histogram.sum(), self._cached_state_histogram))
 
-        # Update log weights based on target probabilities
-        self._update_log_weights()
 
     def _local_jump(self, replicas_log_P_k):
         n_replica, n_states, locality = self.n_replicas, self.n_states, self.locality
@@ -497,13 +528,7 @@ class SAMSSampler(multistate.MultiStateSampler):
 
         n_replica, n_states = self.n_replicas, self.n_states
         for replica_index, current_state_index in enumerate(self._replica_thermodynamic_states):
-            if (current_state_index == 0) or (current_state_index == self.n_states-1):
-                self.walker.append(current_state_index)
-            else:
-                self.walker.append(self.walker[-1])
-            if (len(self.walker) > 1):
-                if (self.walker[-1] != self.walker[-2]) and (self.walker[-1] == self.walker_initial_index):
-                    self.round_trips += 1
+
             neighborhood = self._neighborhood(current_state_index)
 
             # Compute unnormalized log probabilities for all thermodynamic states.
@@ -596,84 +621,49 @@ class SAMSSampler(multistate.MultiStateSampler):
 
         N_k = self._state_histogram
         logger.debug('    state histogram counts ({} total): {}'.format(self._cached_state_histogram.sum(), self._cached_state_histogram))
-        logger.debug(' round trips: {}'.format(self.round_trips))
-        if (self.weight_update_method != 'wang-landau'):
-            if (self.update_stages == 'two-stage') and (self._stage == 0):
-                advance = False
-                if N_k.sum() == 0:
-                    # No samples yet; don't do anything.
-                    return
-                if (self.flatness_criteria == 'round-trip'):
-                    if (self.round_trips >= 1):
-                        empirical_pi_k = N_k[:] / N_k.sum()
-                        pi_k = np.exp(self.log_target_probabilities)
-                        relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
-                        if np.all(relative_error_k < self.flatness_threshold):
-                            advance = True
-                elif self.flatness_criteria == 'minimum-visits':
-                    minimum_visits = 50
-                    # Advance if every state has been visited at least once
-                    if np.all(N_k >= minimum_visits):
-                        advance = True
-                elif self.flatness_criteria == 'histogram-flatness':
+        logger.debug(' round trips: {}'.format(self._round_trips))
+        if ((self.update_stages == 'two-stage') and (self._stage == 0)) or (self.weight_update_method == 'wang-landau'):
+            if N_k.sum() == 0:
+                # No samples yet; don't do anything.
+                return
+            for criteria,value in self._criteria.items():
+                if criteria == 'histogram_flatness':
                     # Check histogram flatness
                     empirical_pi_k = N_k[:] / N_k.sum()
                     pi_k = np.exp(self.log_target_probabilities)
                     relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
-                    if np.all(relative_error_k < self.flatness_threshold):
-                        advance = True
-                elif self.flatness_criteria == 'logZ-flatness':
-                    # TODO: Advance to asymptotically optimal scheme when logZ update fractional counts per state exceed threshold
-                    # for all states.
+                    if np.all(relative_error_k < value):
+                        self._advance['histogram_flatness'] = True
+                elif criteria == 'minimum_round_trips' and self._round_trips >= value:
+                    # Check number of round_trips
+                    self._advance['minimum_round_trips'] = True
+                elif criteria == 'minimum_visits' and np.all(N_k >= value):
+                    # Check number of visits
+                    self._advance['mimimum_visits'] = True
+                elif criteria == 'minimum_logZ':
                     criteria = abs(self._logZ / self.gamma0) > self.flatness_threshold
                     logger.debug('logZ-flatness criteria met (%d total): %s' % (np.sum(criteria), str(np.array(criteria, 'i1'))))
                     if np.all(criteria):
-                        advance = True
-                else:
-                    raise ValueError("Unknown flatness_criteria %s" % flatness_criteria)
+                        self._advance['minimum_logZ'] = True
 
-                if advance or ((self._t0 > 0) and (self._iteration > self._t0)):
-                    # Histograms are sufficiently flat; switch to asymptotically optimal scheme
-                    self._stage = 1 # asymptotically optimal
-                    # TODO: On resuming, we need to recompute or restore t0, or use some other way to compute it
-                    self._t0 = self._iteration - 1
-                    logger.debug('sams changed state after {} iterations'.format(self._t0))
+                if all(v == True for v in self._advance.values()) or ((self._t0 > 0) and (self._iteration > self._t0)):
+                    if (self.weight_update_method != 'wang-landau'):
+                        #switch to asymptotically optimal scheme
+                        self._stage = 1 # asymptotically optimal
+                        self._t0 = self._iteration - 1
+                        logger.debug('sams changed state after {} iterations'.format(self._t0))
 
-        else:
-            if (self.flatness_criteria == 'round-trip'):
-                if (self.round_trips >= 1):
-                    minimum_visits = 50
-                    if np.all(N_k >= minimum_visits):
-                        empirical_pi_k = N_k[:] / N_k.sum()
-                        pi_k = np.exp(self.log_target_probabilities)
-                        relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
-                        if np.all(relative_error_k < self.flatness_threshold):
-                            self._gain_factor = self._gain_factor/2.0
-                            self.wl_steps_stage.append(self._iteration)
-                            logger.debug('wang-landau change stage after iteration {}'.format(self.wl_steps_stage[-1]))
-                            logger.debug('wang-landau gain factor is {}'.format(self._gain_factor))
-                            self.advance_wl = True
-                            self._cached_state_histogram = np.zeros(self.n_states, dtype=int)
-                            self.round_trips = 0
-                            self.walker_initial_index = self.walker[-1]
-                            self.walker_last_index = self.walker[-1]
-                            self.walker=[self.walker[-1]]
-
-            else:
-                minimum_visits = 50
-                if np.all(N_k >= minimum_visits):
-                    empirical_pi_k = N_k[:] / N_k.sum()
-                    pi_k = np.exp(self.log_target_probabilities)
-                    relative_error_k = np.abs(pi_k - empirical_pi_k) / pi_k
-                    if np.all(relative_error_k < self.flatness_threshold):
+                    else:
                         self._gain_factor = self._gain_factor/2.0
                         self.wl_steps_stage.append(self._iteration)
                         logger.debug('wang-landau change stage after iteration {}'.format(self.wl_steps_stage[-1]))
                         logger.debug('wang-landau gain factor is {}'.format(self._gain_factor))
                         self.advance_wl = True
                         self._cached_state_histogram = np.zeros(self.n_states, dtype=int)
-
-
+                        if self._downhill == True:
+                            self._round_trips = -1
+                        else:
+                            self._round_trips = 0
 
     def _update_logZ_estimates(self, replicas_log_P_k):
         """
@@ -703,14 +693,12 @@ class SAMSSampler(multistate.MultiStateSampler):
         # Update logZ estimates from all replicas
         for (replica_index, state_index) in enumerate(self._replica_thermodynamic_states):
             logger.debug(' Replica %d state %d' % (replica_index, state_index))
-            # Compute attenuation factor gamma
-            beta_factor = 0.6
             pi_star = pi_k.min()
             t = float(self._iteration)
             if self._stage == 0: # initial stage
-                gamma = self.gamma0 * min(pi_star, t**(-beta_factor)) # Eq. 15 of [1]
+                gamma = self.gamma0 * min(pi_star, t**(-self.beta_factor)) # Eq. 15 of [1]
             elif self._stage == 1:
-                gamma = self.gamma0 * min(pi_star, (t - self._t0 + self._t0**beta_factor)**(-1)) # Eq. 15 of [1]
+                gamma = self.gamma0 * min(pi_star, (t - self._t0 + self._t0**self.beta_factor)**(-1)) # Eq. 15 of [1]
             else:
                 raise Exception('stage {} unknown'.format(self._stage))
 
