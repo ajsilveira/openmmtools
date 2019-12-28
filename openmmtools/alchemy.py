@@ -795,13 +795,16 @@ class AbsoluteAlchemicalFactory(object):
 
         # Get energy components
         energy_components = collections.OrderedDict()
+        derivative_components = collections.OrderedDict()
         for force_label, force_index in force_labels.items():
             energy_components[force_label] = context.getState(getEnergy=True,
                                                                 groups=2**force_index).getPotentialEnergy()
+            derivative = context.getState(getParameterDerivatives=True, groups=2**force_index).getEnergyParameterDerivatives()
+            derivative_components[force_label] = derivative['lambda_sterics']
 
         # Clean up
         del context, integrator
-        return energy_components
+        return energy_components, derivative_components
 
     # -------------------------------------------------------------------------
     # Internal usage: AlchemicalRegion
@@ -1750,6 +1753,7 @@ class AbsoluteAlchemicalFactory(object):
                     for suffix in lambda_var_suffixes:
                         name = (lambda_variable_name + suffix)
                         force.addGlobalParameter(name, 1.0)
+                        force.addEnergyParameterDerivative(name)
                 else:  # fix lambda variable to 1.0
                     for suffix in lambda_var_suffixes:
                         name = (lambda_variable_name + suffix)
